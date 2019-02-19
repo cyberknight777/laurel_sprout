@@ -551,8 +551,9 @@ static bool is_configured(struct hci_dev *hdev)
 	    !hci_dev_test_flag(hdev, HCI_EXT_CONFIGURED))
 		return false;
 
-	if (test_bit(HCI_QUIRK_INVALID_BDADDR, &hdev->quirks) &&
-	    !bacmp(&hdev->public_addr, BDADDR_ANY))
+	if ((test_bit(HCI_QUIRK_INVALID_BDADDR, &hdev->quirks) ||
+	     test_bit(HCI_QUIRK_USE_BDADDR_PROPERTY, &hdev->quirks)) &&
+              !bacmp(&hdev->public_addr, BDADDR_ANY))
 		return false;
 
 	return true;
@@ -566,7 +567,8 @@ static __le32 get_missing_options(struct hci_dev *hdev)
 	    !hci_dev_test_flag(hdev, HCI_EXT_CONFIGURED))
 		options |= MGMT_OPTION_EXTERNAL_CONFIG;
 
-	if (test_bit(HCI_QUIRK_INVALID_BDADDR, &hdev->quirks) &&
+	if ((test_bit(HCI_QUIRK_INVALID_BDADDR, &hdev->quirks) ||
+	     test_bit(HCI_QUIRK_USE_BDADDR_PROPERTY, &hdev->quirks)) &&
 	    !bacmp(&hdev->public_addr, BDADDR_ANY))
 		options |= MGMT_OPTION_PUBLIC_ADDRESS;
 
@@ -635,7 +637,8 @@ static u32 get_supported_settings(struct hci_dev *hdev)
 
 		if (lmp_ssp_capable(hdev)) {
 			settings |= MGMT_SETTING_SSP;
-			settings |= MGMT_SETTING_HS;
+			if (IS_ENABLED(CONFIG_BT_HS))
+				settings |= MGMT_SETTING_HS;
 		}
 
 		if (lmp_sc_capable(hdev))
@@ -1645,6 +1648,10 @@ static int set_hs(struct sock *sk, struct hci_dev *hdev, void *data, u16 len)
 
 	BT_DBG("request for %s", hdev->name);
 
+	if (!IS_ENABLED(CONFIG_BT_HS))
+		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_SET_HS,
+				       MGMT_STATUS_NOT_SUPPORTED);
+
 	status = mgmt_bredr_support(hdev);
 	if (status)
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_SET_HS, status);
@@ -2159,8 +2166,8 @@ static int load_link_keys(struct sock *sk, struct hci_dev *hdev, void *data,
 
 	key_count = __le16_to_cpu(cp->key_count);
 	if (key_count > max_key_count) {
-		BT_ERR("load_link_keys: too big key_count value %u",
-		       key_count);
+		bt_dev_err(hdev, "load_link_keys: too big key_count value %u",
+			   key_count);
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_LOAD_LINK_KEYS,
 				       MGMT_STATUS_INVALID_PARAMS);
 	}
@@ -2168,8 +2175,8 @@ static int load_link_keys(struct sock *sk, struct hci_dev *hdev, void *data,
 	expected_len = sizeof(*cp) + key_count *
 					sizeof(struct mgmt_link_key_info);
 	if (expected_len != len) {
-		BT_ERR("load_link_keys: expected %u bytes, got %u bytes",
-		       expected_len, len);
+		bt_dev_err(hdev, "load_link_keys: expected %u bytes, got %u bytes",
+			   expected_len, len);
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_LOAD_LINK_KEYS,
 				       MGMT_STATUS_INVALID_PARAMS);
 	}
@@ -2558,7 +2565,7 @@ static int pin_code_reply(struct sock *sk, struct hci_dev *hdev, void *data,
 
 		memcpy(&ncp.addr, &cp->addr, sizeof(ncp.addr));
 
-		BT_ERR("PIN code is not 16 bytes long");
+		bt_dev_err(hdev, "PIN code is not 16 bytes long");
 
 		err = send_pin_code_neg_reply(sk, hdev, &ncp);
 		if (err >= 0)
@@ -3388,7 +3395,8 @@ static int add_remote_oob_data(struct sock *sk, struct hci_dev *hdev,
 					MGMT_OP_ADD_REMOTE_OOB_DATA,
 					status, &cp->addr, sizeof(cp->addr));
 	} else {
-		BT_ERR("add_remote_oob_data: invalid length of %u bytes", len);
+		bt_dev_err(hdev, "add_remote_oob_data: invalid len of %u bytes",
+			   len);
 		err = mgmt_cmd_status(sk, hdev->id, MGMT_OP_ADD_REMOTE_OOB_DATA,
 				      MGMT_STATUS_INVALID_PARAMS);
 	}
@@ -3601,8 +3609,8 @@ static int start_service_discovery(struct sock *sk, struct hci_dev *hdev,
 
 	uuid_count = __le16_to_cpu(cp->uuid_count);
 	if (uuid_count > max_uuid_count) {
-		BT_ERR("service_discovery: too big uuid_count value %u",
-		       uuid_count);
+		bt_dev_err(hdev, "service_discovery: too big uuid_count value %u",
+			   uuid_count);
 		err = mgmt_cmd_complete(sk, hdev->id,
 					MGMT_OP_START_SERVICE_DISCOVERY,
 					MGMT_STATUS_INVALID_PARAMS, &cp->type,
@@ -3612,8 +3620,8 @@ static int start_service_discovery(struct sock *sk, struct hci_dev *hdev,
 
 	expected_len = sizeof(*cp) + uuid_count * 16;
 	if (expected_len != len) {
-		BT_ERR("service_discovery: expected %u bytes, got %u bytes",
-		       expected_len, len);
+		bt_dev_err(hdev, "service_discovery: expected %u bytes, got %u bytes",
+			   expected_len, len);
 		err = mgmt_cmd_complete(sk, hdev->id,
 					MGMT_OP_START_SERVICE_DISCOVERY,
 					MGMT_STATUS_INVALID_PARAMS, &cp->type,
@@ -3940,7 +3948,7 @@ static void set_advertising_complete(struct hci_dev *hdev, u8 status,
 		err = hci_req_run(&req, enable_advertising_instance);
 
 	if (err)
-		BT_ERR("Failed to re-configure advertising");
+		bt_dev_err(hdev, "failed to re-configure advertising");
 
 unlock:
 	hci_dev_unlock(hdev);
@@ -4661,15 +4669,16 @@ static int load_irks(struct sock *sk, struct hci_dev *hdev, void *cp_data,
 
 	irk_count = __le16_to_cpu(cp->irk_count);
 	if (irk_count > max_irk_count) {
-		BT_ERR("load_irks: too big irk_count value %u", irk_count);
+		bt_dev_err(hdev, "load_irks: too big irk_count value %u",
+			   irk_count);
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_LOAD_IRKS,
 				       MGMT_STATUS_INVALID_PARAMS);
 	}
 
 	expected_len = sizeof(*cp) + irk_count * sizeof(struct mgmt_irk_info);
 	if (expected_len != len) {
-		BT_ERR("load_irks: expected %u bytes, got %u bytes",
-		       expected_len, len);
+		bt_dev_err(hdev, "load_irks: expected %u bytes, got %u bytes",
+			   expected_len, len);
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_LOAD_IRKS,
 				       MGMT_STATUS_INVALID_PARAMS);
 	}
@@ -4742,7 +4751,8 @@ static int load_long_term_keys(struct sock *sk, struct hci_dev *hdev,
 
 	key_count = __le16_to_cpu(cp->key_count);
 	if (key_count > max_key_count) {
-		BT_ERR("load_ltks: too big key_count value %u", key_count);
+		bt_dev_err(hdev, "load_ltks: too big key_count value %u",
+			   key_count);
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_LOAD_LONG_TERM_KEYS,
 				       MGMT_STATUS_INVALID_PARAMS);
 	}
@@ -4750,8 +4760,8 @@ static int load_long_term_keys(struct sock *sk, struct hci_dev *hdev,
 	expected_len = sizeof(*cp) + key_count *
 					sizeof(struct mgmt_ltk_info);
 	if (expected_len != len) {
-		BT_ERR("load_keys: expected %u bytes, got %u bytes",
-		       expected_len, len);
+		bt_dev_err(hdev, "load_keys: expected %u bytes, got %u bytes",
+			   expected_len, len);
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_LOAD_LONG_TERM_KEYS,
 				       MGMT_STATUS_INVALID_PARAMS);
 	}
@@ -4870,14 +4880,15 @@ static void conn_info_refresh_complete(struct hci_dev *hdev, u8 hci_status,
 	}
 
 	if (!cp) {
-		BT_ERR("invalid sent_cmd in conn_info response");
+		bt_dev_err(hdev, "invalid sent_cmd in conn_info response");
 		goto unlock;
 	}
 
 	handle = __le16_to_cpu(cp->handle);
 	conn = hci_conn_hash_lookup_handle(hdev, handle);
 	if (!conn) {
-		BT_ERR("unknown handle (%d) in conn_info response", handle);
+		bt_dev_err(hdev, "unknown handle (%d) in conn_info response",
+			   handle);
 		goto unlock;
 	}
 
@@ -5474,8 +5485,8 @@ static int load_conn_param(struct sock *sk, struct hci_dev *hdev, void *data,
 
 	param_count = __le16_to_cpu(cp->param_count);
 	if (param_count > max_param_count) {
-		BT_ERR("load_conn_param: too big param_count value %u",
-		       param_count);
+		bt_dev_err(hdev, "load_conn_param: too big param_count value %u",
+			   param_count);
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_LOAD_CONN_PARAM,
 				       MGMT_STATUS_INVALID_PARAMS);
 	}
@@ -5483,8 +5494,8 @@ static int load_conn_param(struct sock *sk, struct hci_dev *hdev, void *data,
 	expected_len = sizeof(*cp) + param_count *
 					sizeof(struct mgmt_conn_param);
 	if (expected_len != len) {
-		BT_ERR("load_conn_param: expected %u bytes, got %u bytes",
-		       expected_len, len);
+		bt_dev_err(hdev, "load_conn_param: expected %u bytes, got %u bytes",
+			   expected_len, len);
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_LOAD_CONN_PARAM,
 				       MGMT_STATUS_INVALID_PARAMS);
 	}
@@ -5509,7 +5520,7 @@ static int load_conn_param(struct sock *sk, struct hci_dev *hdev, void *data,
 		} else if (param->addr.type == BDADDR_LE_RANDOM) {
 			addr_type = ADDR_LE_DEV_RANDOM;
 		} else {
-			BT_ERR("Ignoring invalid connection parameters");
+			bt_dev_err(hdev, "ignoring invalid connection parameters");
 			continue;
 		}
 
@@ -5522,14 +5533,14 @@ static int load_conn_param(struct sock *sk, struct hci_dev *hdev, void *data,
 		       min, max, latency, timeout);
 
 		if (hci_check_conn_params(min, max, latency, timeout) < 0) {
-			BT_ERR("Ignoring invalid connection parameters");
+			bt_dev_err(hdev, "ignoring invalid connection parameters");
 			continue;
 		}
 
 		hci_param = hci_conn_params_add(hdev, &param->addr.bdaddr,
 						addr_type);
 		if (!hci_param) {
-			BT_ERR("Failed to add connection parameters");
+			bt_dev_err(hdev, "failed to add connection parameters");
 			continue;
 		}
 
