@@ -494,8 +494,6 @@ static void hci_ibs_tx_idle_timeout(struct timer_list *t)
 
 	case HCI_IBS_TX_ASLEEP:
 	case HCI_IBS_TX_WAKING:
-		/* Fall through */
-
 	default:
 		BT_ERR("Spurious timeout tx state %d", qca->tx_ibs_state);
 		break;
@@ -538,8 +536,6 @@ static void hci_ibs_wake_retrans_timeout(struct timer_list *t)
 
 	case HCI_IBS_TX_ASLEEP:
 	case HCI_IBS_TX_AWAKE:
-		/* Fall through */
-
 	default:
 		BT_ERR("Spurious timeout tx state %d", qca->tx_ibs_state);
 		break;
@@ -861,8 +857,6 @@ static void device_woke_up(struct hci_uart *hu)
 		break;
 
 	case HCI_IBS_TX_ASLEEP:
-		/* Fall through */
-
 	default:
 		BT_ERR("Received HCI_IBS_WAKE_ACK in tx state %d",
 		       qca->tx_ibs_state);
@@ -2098,7 +2092,7 @@ static int __maybe_unused qca_suspend(struct device *dev)
 	switch (qca->tx_ibs_state) {
 	case HCI_IBS_TX_WAKING:
 		del_timer(&qca->wake_retrans_timer);
-		/* Fall through */
+		fallthrough;
 	case HCI_IBS_TX_AWAKE:
 		del_timer(&qca->tx_idle_timer);
 
