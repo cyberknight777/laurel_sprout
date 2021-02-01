@@ -322,10 +322,11 @@ static void qca_wq_awake_device(struct work_struct *work)
 					    ws_awake_device);
 	struct hci_uart *hu = qca->hu;
 	unsigned long retrans_delay;
+        unsigned long flags;
 
 	BT_DBG("hu %p wq awake device", hu);
 
-	spin_lock(&qca->hci_ibs_lock);
+	 spin_lock_irqsave(&qca->hci_ibs_lock, flags);
 
 	/* Vote for serial clock */
 	serial_clock_vote(HCI_IBS_TX_VOTE_CLOCK_ON, hu);
@@ -340,7 +341,7 @@ static void qca_wq_awake_device(struct work_struct *work)
 	retrans_delay = msecs_to_jiffies(qca->wake_retrans);
 	mod_timer(&qca->wake_retrans_timer, jiffies + retrans_delay);
 
-	spin_unlock(&qca->hci_ibs_lock);
+	spin_unlock_irqrestore(&qca->hci_ibs_lock, flags);
 
 	/* Actually send the packets */
 	hci_uart_tx_wakeup(hu);
@@ -351,10 +352,11 @@ static void qca_wq_awake_rx(struct work_struct *work)
 	struct qca_data *qca = container_of(work, struct qca_data,
 					    ws_awake_rx);
 	struct hci_uart *hu = qca->hu;
+        unsigned long flags;
 
 	BT_DBG("hu %p wq awake rx", hu);
 
-	spin_lock(&qca->hci_ibs_lock);
+	spin_lock_irqsave(&qca->hci_ibs_lock, flags);
 
 	serial_clock_vote(HCI_IBS_RX_VOTE_CLOCK_ON, hu);
 
@@ -368,7 +370,7 @@ static void qca_wq_awake_rx(struct work_struct *work)
 
 	qca->ibs_sent_wacks++;
 
-	spin_unlock(&qca->hci_ibs_lock);
+	spin_unlock_irqrestore(&qca->hci_ibs_lock, flags);
 
 	/* Actually send the packets */
 	hci_uart_tx_wakeup(hu);
